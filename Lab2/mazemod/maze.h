@@ -16,12 +16,14 @@ typedef struct {
 	int sx, sy;		// initial position
 	int ex, ey;		// target  position
 	char blk[_MAZE_MAXY][_MAZE_MAXX];
+  // char **blk;
 }	maze_t;
 
-typedef struct {
+typedef struct user_d{
   int id;
   coord_t pos;
   maze_t* maze;
+  struct user_d* next_user;
 }user_d;
 
 #define MAZE_CREATE   _IOW('M', 0, coord_t)
@@ -37,8 +39,8 @@ typedef struct {
 #ifndef __KERNEL__
 void maze_render_raw(maze_t *m, int cx, int cy, int shownum);
 void maze_render_box(maze_t *m, int cx, int cy, int shownum);
-void maze_create(maze_t *m, coord_t coord);
-void maze_move(user_d *u, coord_t coord);
+// void maze_create(maze_t *m, coord_t coord);
+// void maze_move(user_d *u, coord_t coord);
 #endif
 
 #endif

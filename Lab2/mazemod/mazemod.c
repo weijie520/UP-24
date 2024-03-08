@@ -17,38 +17,155 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/mutex.h>
+#include <linux/random.h>
 #include "maze.h"
 
 DEFINE_MUTEX(mylock);
+DEFINE_MUTEX(numlock);
 
 static dev_t devnum;
 static struct cdev c_dev;
 static struct class *clazz;
 
-// static struct user_data {
-//   int id;
-//   coord_t pos;
-//   maze_t* maze;
-// }users[3];
-static user_d *users[3];
-// static maze_t *maze[3];
+// static user_d *users[3];
+static user_d *users_head = NULL;
 static int cur = 0;
 
-// char buf[_MAZE_MAXX*_MAZE_MAXY];
-void maze_create(maze_t *m, coord_t coord){
+typedef struct Point{
+  int prevx;
+  int prevy;
+  int x;
+  int y;
+}Point;
+
+typedef struct Stack{
+  Point point;
+  struct Stack* next;
+}Stack;
+
+// void maze_init(maze_t *m, int **is_visited, int prevx, int prevy, int x, int y){
+//   if(is_visited[y][x])
+//     return;
+
+//   m->blk[y][x] = 0;
+//   is_visited[y][x] = 1;
+
+//   m->blk[(y + prevy)/2][(x + prevx)/2] = 0;
+//   is_visited[(y + prevy)/2][(x + prevx)/2] = 1;
+
+//   int dx[] = {2,-2,0,0};
+//   int dy[] = {0,0,2,-2};
+//   int rand = get_random_u32() % 4;
+
+//   for(int i = 0; i < 4; i++){
+//     int nextx = x + dx[(i+rand)%4];
+//     int nexty = y + dy[(i+rand)%4];
+//     if(nextx > 0 && nextx < m->w-1 && nexty > 0 && nexty < m->h-1)
+//       maze_init(m, is_visited, x, y, nextx, nexty);
+//     else continue;
+//   }
+//   return;
+// }
+
+void push(Stack **stack, Stack* node){
+  node->next = *stack;
+  *stack = node;
+}
+
+Stack* pop(Stack **stack){
+  Stack *top = *stack;
+  if(!top)
+    return NULL;
+  *stack = top->next;
+  return top;
+}
+
+void maze_create(maze_t *m, int **is_visited, Stack *stack, int top){
+  int dx[] = {2,-2,0,0};
+  int dy[] = {0,0,2,-2};
+
+  while(stack){
+    Stack *tmp = pop(&stack);
+    top--;
+
+    // if(!stack)
+    //   printk(KERN_INFO "stack is empty now\n");
+    // else printk(KERN_INFO "stack is not empty\n");
+    // printk(KERN_INFO "top: %d\n", top);
+    if(is_visited[tmp->point.y][tmp->point.x]){
+      kfree(tmp);
+      continue;
+    }
+    // printk(KERN_INFO "top: %d %d %d %d %d\n", top, tmp->point.x, tmp->point.y, tmp->point.prevx, tmp->point.prevy);
+    m->blk[tmp->point.y][tmp->point.x] = 0;
+    is_visited[tmp->point.y][tmp->point.x] = 1;
+
+    m->blk[(tmp->point.y + tmp->point.prevy)/2][(tmp->point.x + tmp->point.prevx)/2] = 0;
+    is_visited[(tmp->point.y + tmp->point.prevy)/2][(tmp->point.x + tmp->point.prevx)/2] = 1;
+
+    int rand = get_random_u32() % 4;
+    for(int i = 0; i < 4; i++){
+      int nextx = tmp->point.x + dx[(i+rand)%4];
+      int nexty = tmp->point.y + dy[(i+rand)%4];
+      if(nextx > 0 && nextx < m->w-1 && nexty > 0 && nexty < m->h-1){
+        Stack *s = kzalloc(sizeof(Stack), GFP_KERNEL);
+        s->point.prevx = tmp->point.x;
+        s->point.prevy = tmp->point.y;
+        s->point.x = nextx;
+        s->point.y = nexty;
+        s->next = NULL;
+        push(&stack, s);
+        top++;
+      }
+      else continue;
+    }
+    kfree(tmp);
+  }
+}
+
+void maze_init(maze_t *m, coord_t coord){
   m->w = coord.x;
   m->h = coord.y;
-  m->sx = 1;
-  m->sy = 1;
-  m->ex = coord.x-2;
-  m->ey = coord.y-2;
+  // m->sx = 1;
+  // m->sy = 1;
+  // m->ex = coord.x-2;
+  // m->ey = coord.y-2;
+  int **is_visited = kzalloc(m->h*sizeof(int*), GFP_KERNEL);
+
   for(int i = 0; i < m->h; i++){
+    is_visited[i] = kzalloc(m->w*sizeof(int), GFP_KERNEL);
     for(int j = 0; j < m->w; j++){
-      if(i == 0 || i == m->h-1 || j == 0 || j == m->w-1)
-        m->blk[i][j] = 1;
-      else m->blk[i][j] = 0;
+      // if(i == 0 || i == m->h-1 || j == 0 || j == m->w-1)
+      is_visited[i][j] = 0;
+      m->blk[i][j] = 1;
+      // else m->blk[i][j] = 0;
     }
   }
+
+  Stack *s = kzalloc(sizeof(Stack), GFP_KERNEL);
+  s->point.prevx = 1;
+  s->point.prevy = 1;
+  s->point.x = 1;
+  s->point.y = 1;
+  s->next = NULL;
+  maze_create(m, is_visited, s, 1);
+  for(int i = 0; i < m->h; i++){
+    kfree(is_visited[i]);
+  }
+  kfree(is_visited);
+
+  do{
+    m->sx = get_random_u32() % (m->w-2) + 1;
+    m->sy = get_random_u32() % (m->h-2) + 1;
+  }while(m->blk[m->sy][m->sx] == 1);
+
+  do{
+    m->ex = get_random_u32() % (m->w-2) + 1;
+    m->ey = get_random_u32() % (m->h-2) + 1;
+  }while((m->blk[m->ey][m->ex]==1) || ((m->ex==m->sx) && (m->ey==m->sy)));
+  // kfree(s);
+  // maze_init(m, is_visited, 1, 1, 1, 1);
+
 }
 
 void move(user_d *u, coord_t coord){
@@ -60,182 +177,215 @@ void move(user_d *u, coord_t coord){
   }
 }
 
+user_d* search_front_user(user_d *head, int id){
+  user_d *tmp = head;
+  if(!tmp || tmp->id == id)
+    return NULL;
+  while(tmp->next_user){
+    if(tmp->next_user->id == id){
+      return tmp;
+    }
+    tmp = tmp->next_user;
+  }
+  return NULL;
+}
+
+user_d* search_user(user_d *head, int id){
+  user_d *tmp = head;
+  while(tmp){
+    if(tmp->id == id){
+      return tmp;
+    }
+    tmp = tmp->next_user;
+  }
+  return NULL;
+}
+
 static int mazemod_dev_open(struct inode *i, struct file *f) {
-	// printk(KERN_INFO "mazemod: device opened.\n");
+  user_d *newnode = kzalloc(sizeof(user_d), GFP_KERNEL);
+  newnode->id = current->pid;
+  newnode->maze = NULL;
+  newnode->next_user = NULL;
+
   mutex_lock(&mylock);
-    if(cur < _MAZE_MAXUSER){
-      for(int i = 0; i < _MAZE_MAXUSER; i++){
-        if(!users[i]){
-          users[i] = kzalloc(sizeof(user_d), GFP_KERNEL);
-          users[i]->id = current->pid;
-          users[i]->maze = NULL;
-          break;
-        }
-      }
-      cur++;
+  if(!users_head){
+    users_head = newnode;
+  }
+  else{
+    user_d *now = users_head;
+    while(now->next_user){
+      now = now->next_user;
     }
-    else{
-      mutex_unlock(&mylock);
-      return -ENOMEM;
-    }
+    now->next_user = newnode;
+  }
   mutex_unlock(&mylock);
 	return 0;
 }
 
 static int mazemod_dev_close(struct inode *i, struct file *f) {
-
-  for(int i = 0; i < _MAZE_MAXUSER; i++){
-    if(users[i] && users[i]->id == current->pid){
-      if(users[i]->maze){
-        kfree(users[i]->maze);
-        users[i]->maze = NULL;
-      }
-      kfree(users[i]);
-      users[i] = NULL;
-      break;
-    }
-  }
   mutex_lock(&mylock);
-  cur--;
+  user_d* front = search_front_user(users_head, current->pid);
+  // printk(KERN_INFO "%d\n", current->pid);
+  user_d* now = search_user(users_head, current->pid);
+  if(now && !front){
+    if(now->maze){
+      kfree(now->maze);
+      now->maze = NULL;
+      cur--;
+    }
+    users_head = now->next_user;
+    kfree(now);
+  }
+  else if(now && front){
+    front->next_user = now->next_user;
+    if(now->maze){
+      kfree(now->maze);
+      now->maze = NULL;
+      cur--;
+    }
+    kfree(now);
+    now = NULL;
+  }
   mutex_unlock(&mylock);
-	// printk(KERN_INFO "mazemod: device closed.\n");
 	return 0;
 }
 
 static ssize_t mazemod_dev_read(struct file *f, char __user *buf, size_t len, loff_t *off) {
-	// if(maze){
-  //   // char buf[]
-  //   // printk(KERN_INFO "vacancy");
-  // }
-  // printk(KERN_INFO "mazemod: read %zu bytes @ %llu.\n", len, *off);
-	return len;
+  int bytes_read = 0;
+  mutex_lock(&mylock);
+  user_d *now = search_user(users_head, current->pid);
+  mutex_unlock(&mylock);
+  if(!now->maze)
+    return -EBADFD;
+
+  for(int i = 0; i < now->maze->h; i++){
+    if(copy_to_user(buf + bytes_read, now->maze->blk[i], now->maze->w) != 0)
+      return -EBUSY;
+    bytes_read += now->maze->w;
+  }
+	return bytes_read;
 }
 
 static ssize_t mazemod_dev_write(struct file *f, const char __user *buf, size_t len, loff_t *off) {
-	// printk(KERN_INFO "mazemod: write %zu bytes @ %llu.\n", len, *off);
+
+  mutex_lock(&mylock);
+  user_d* now = search_user(users_head, current->pid);
+  mutex_unlock(&mylock);
+  if(!now->maze)
+    return -EBADFD;
+
+  if(len%sizeof(coord_t) != 0)
+    return -EINVAL;
+
+  coord_t *coords = NULL;
+  int steps = len/sizeof(coord_t);
+  coords = kzalloc(steps*sizeof(coord_t), GFP_KERNEL);
+
+  if (copy_from_user(coords, buf, len) != 0){
+    kfree(coords);
+    return -EBUSY;
+  }
+
+  for(int i = 0; i < steps; i++){
+    move(now, coords[i]);
+  }
+
 	return len;
 }
 
 static long mazemod_dev_ioctl(struct file *fp, unsigned int cmd, unsigned long arg) {
-	// printk(KERN_INFO "mazemod: ioctl cmd=%u arg=%lu.\n", cmd, arg);
-  // int flag = 0;
-  int index = 0;
   coord_t coord;
-  // mutex_lock(&mylock);
-  for(int i = 0; i < _MAZE_MAXUSER; i++){
-    if(users[i] && users[i]->id == current->pid){ // already exist
-      index = i;
-      // flag = 1;
-      break;
-    }
-    // else if(users[i]->id == -1)
-    //   index = index < i ? index : i;
-  }
-  // mutex_unlock(&mylock);
+  mutex_lock(&mylock);
+  user_d* now = search_user(users_head, current->pid);
+  mutex_unlock(&mylock);
+
   switch(cmd){
     case MAZE_CREATE:
-      if (copy_from_user(&coord, (coord_t __user *)arg, sizeof(coord_t)) != 0) {
+      if (copy_from_user(&coord, (coord_t __user *)arg, sizeof(coord_t)) != 0)
         return -EBUSY;
-      }
       if(coord.x < 0 || coord.y < 0)
         return -EINVAL;
-
-      if(users[index]->maze) // already exist
+      if(now->maze) // already exist
         return -EEXIST;
-      // index = 0;
       mutex_lock(&mylock);
-        // for(int i = 0; i < _MAZE_MAXUSER; i++){
-        //   if(!users[i]->maze){
-        //     index = i;
-        //     break;
-        //   }
-        // }
-        // if(cur < _MAZE_MAXUSER){
-          users[index]->id = current->pid;
-          users[index]->maze = kzalloc(sizeof(maze_t), GFP_KERNEL);
+        if(cur < _MAZE_MAXUSER)
+          cur++;
+        else{
+          mutex_unlock(&mylock);
+          return -ENOMEM;
+        }
 
-          maze_create(users[index]->maze, coord);
-          users[index]->pos.x = users[index]->maze->sx;
-          users[index]->pos.y = users[index]->maze->sy;
-          // flag = 1;
-          // cur++;
-        // }
-        // else { // already 3 people
-        //   mutex_unlock(&mylock);
-        //   return -ENOMEM;
-        // }
+      now->maze = kzalloc(sizeof(maze_t), GFP_KERNEL);
+      maze_init(now->maze, coord);
       mutex_unlock(&mylock);
+      now->pos.x = now->maze->sx;
+      now->pos.y = now->maze->sy;
       break;
     case MAZE_RESET:
-      if(users[index]->maze){
-        users[index]->pos.x = users[index]->maze->sx;
-        users[index]->pos.y = users[index]->maze->sy;
+      if(now->maze){
+        now->pos.x = now->maze->sx;
+        now->pos.y = now->maze->sy;
       }
       else return -ENOENT;
-
       break;
     case MAZE_DESTROY:
-      if(users[index]->maze){
-        // users[index]->id = -1;
-        kfree(users[index]->maze);
-        users[index]->maze = NULL;
+      if(now->maze){
+        kfree(now->maze);
+        now->maze = NULL;
+        mutex_lock(&mylock);
+        cur--;
+        mutex_unlock(&mylock);
       }
       else return -ENOENT;
-
       break;
     case MAZE_GETSIZE:
-      if(users[index]->maze){
-        coord.x = users[index]->maze->w;
-        coord.y = users[index]->maze->h;
+      if(now->maze){
+        coord.x = now->maze->w;
+        coord.y = now->maze->h;
         if(copy_to_user((coord_t __user *)arg, &coord, sizeof(coord_t)) != 0){
           return -EBUSY;
         }
       }
       else return -ENOENT;
-
       break;
     case MAZE_MOVE:
-      if(users[index]->maze){
+      if(now->maze){
         if (copy_from_user(&coord, (coord_t __user *)arg, sizeof(coord_t)) != 0) {
           return -EBUSY;
         }
-        move(users[index], coord);
+        move(now, coord);
       }
       else return -ENOENT;
-
       break;
     case MAZE_GETPOS:
-      if(users[index]->maze){
-        coord.x = users[index]->pos.x;
-        coord.y = users[index]->pos.y;
+      if(now->maze){
+        coord.x = now->pos.x;
+        coord.y = now->pos.y;
         if(copy_to_user((coord_t __user *)arg, &coord, sizeof(coord_t)) != 0){
           return -EBUSY;
         }
       }
       else return -ENOENT;
-
       break;
     case MAZE_GETSTART:
-      if(users[index]->maze){
-        coord.x = users[index]->maze->sx;
-        coord.y = users[index]->maze->sy;
+      if(now->maze){
+        coord.x = now->maze->sx;
+        coord.y = now->maze->sy;
         if(copy_to_user((coord_t __user *)arg, &coord, sizeof(coord_t)) != 0){
           return -EBUSY;
         }
       }
       else return -ENOENT;
-
       break;
     case MAZE_GETEND:
-      if(users[index]->maze){
-        coord.x = users[index]->maze->ex;
-        coord.y = users[index]->maze->ey;
+      if(now->maze){
+        coord.x = now->maze->ex;
+        coord.y = now->maze->ey;
         if(copy_to_user((coord_t __user *)arg, &coord, sizeof(coord_t)) != 0){
           return -EBUSY;
         }
       }
       else return -ENOENT;
-
       break;
   }
 	return 0;
@@ -251,40 +401,51 @@ static const struct file_operations mazemod_dev_fops = {
 };
 
 static int mazemod_proc_read(struct seq_file *m, void *v) {
-	char index_buf[] = "#00: ";
-  for(int i = 0; i < _MAZE_MAXUSER; i++){
-    seq_printf(m, index_buf);
-    if(!users[i]){
-      seq_printf(m, "vacancy\n");
-    }
-    else{
-      char line_buf[60];
+  mutex_lock(&mylock);
+  int cnt = cur, extra = _MAZE_MAXUSER - cur;
+  user_d *now = users_head;
+
+  char index_buf[] = "#00: ";
+  char line_buf[60];
+
+  while(cnt--){
+    if(now->maze){
+      seq_printf(m, index_buf);
       snprintf(line_buf, 60, "pid %d - [%d x %d]: (%d, %d) -> (%d, %d) @ (%d, %d)\n",
-                users[i]->id, users[i]->maze->w, users[i]->maze->h,
-                users[i]->maze->sx, users[i]->maze->sy, users[i]->maze->ex,
-                users[i]->maze->ey, users[i]->pos.x, users[i]->pos.y);
+                now->id, now->maze->w, now->maze->h,
+                now->maze->sx, now->maze->sy, now->maze->ex,
+                now->maze->ey, now->pos.x, now->pos.y);
       seq_printf(m, line_buf);
-      for(int j = 0; j < users[i]->maze->h; j++){
+      for(int j = 0; j < now->maze->h; j++){
         snprintf(line_buf, 60, "- %03d: ", j);
         seq_printf(m, line_buf);
-        for(int k = 0; k < users[i]->maze->w; k++){
-          if(users[i]->maze->blk[j][k] == 1)
+        for(int k = 0; k < now->maze->w; k++){
+          if(now->maze->blk[j][k] == 1)
             seq_printf(m, "#");
           else{
-            if(j == users[i]->pos.y && k == users[i]->pos.x)
+            if(j == now->pos.y && k == now->pos.x)
               seq_printf(m, "*");
-            else if(j == users[i]->maze->sy && k == users[i]->maze->sx)
+            else if(j == now->maze->sy && k == now->maze->sx)
               seq_printf(m, "S");
-            else if(j == users[i]->maze->ey && k == users[i]->maze->ex)
+            else if(j == now->maze->ey && k == now->maze->ex)
               seq_printf(m, "E");
             else seq_printf(m, ".");
           }
         }
         seq_printf(m, "\n");
       }
-      // continue;
+      seq_printf(m, "\n");
+      index_buf[2]++;
     }
-    seq_printf(m, "\n");
+    if(now->next_user)
+      now = now->next_user;
+    else break;
+  }
+  mutex_unlock(&mylock);
+  while(extra--){
+    // printk(KERN_INFO "%d!!!\n", extra);
+    seq_printf(m, index_buf);
+    seq_printf(m, "vacancy\n\n");
     index_buf[2]++;
   }
 	return 0;
