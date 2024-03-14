@@ -1,5 +1,5 @@
 
-obj-m     += mazemod.o
+obj-m     += maze.o
 ccflags-y += -DEXPORT_SYMTAB
 
 all:
@@ -12,4 +12,4 @@ clean:
 
 install: all
 	mkdir -p ../rootfs/modules
-	cp mazemod.ko ../rootfs/modules
+	cp mazetest maze.ko ../rootfs/modules

@@ -21,7 +21,7 @@
 #include "maze.h"
 
 DEFINE_MUTEX(mylock);
-DEFINE_MUTEX(numlock);
+// DEFINE_MUTEX(numlock);
 
 static dev_t devnum;
 static struct cdev c_dev;
@@ -80,18 +80,13 @@ Stack* pop(Stack **stack){
   return top;
 }
 
-void maze_create(maze_t *m, int **is_visited, Stack *stack, int top){
+void maze_create(maze_t *m, int **is_visited, Stack *stack){
   int dx[] = {2,-2,0,0};
   int dy[] = {0,0,2,-2};
 
   while(stack){
     Stack *tmp = pop(&stack);
-    top--;
 
-    // if(!stack)
-    //   printk(KERN_INFO "stack is empty now\n");
-    // else printk(KERN_INFO "stack is not empty\n");
-    // printk(KERN_INFO "top: %d\n", top);
     if(is_visited[tmp->point.y][tmp->point.x]){
       kfree(tmp);
       continue;
@@ -115,7 +110,6 @@ void maze_create(maze_t *m, int **is_visited, Stack *stack, int top){
         s->point.y = nexty;
         s->next = NULL;
         push(&stack, s);
-        top++;
       }
       else continue;
     }
@@ -148,7 +142,7 @@ void maze_init(maze_t *m, coord_t coord){
   s->point.x = 1;
   s->point.y = 1;
   s->next = NULL;
-  maze_create(m, is_visited, s, 1);
+  maze_create(m, is_visited, s);
   for(int i = 0; i < m->h; i++){
     kfree(is_visited[i]);
   }
@@ -224,9 +218,19 @@ static int mazemod_dev_open(struct inode *i, struct file *f) {
 
 static int mazemod_dev_close(struct inode *i, struct file *f) {
   mutex_lock(&mylock);
+  // printk(KERN_INFO "For pid: %d\n", current->pid);
   user_d* front = search_front_user(users_head, current->pid);
-  // printk(KERN_INFO "%d\n", current->pid);
+  // if(front != NULL)
+  //   printk(KERN_INFO "front: %d\n", front->id);
+
   user_d* now = search_user(users_head, current->pid);
+
+  // if(now != NULL)
+  //   printk(KERN_INFO "now: %d\n", now->id);
+
+  // if(now->id == users_head->id)
+  //   printk(KERN_INFO "This node is head.\n");
+
   if(now && !front){
     if(now->maze){
       kfree(now->maze);
@@ -308,16 +312,18 @@ static long mazemod_dev_ioctl(struct file *fp, unsigned int cmd, unsigned long a
       if(now->maze) // already exist
         return -EEXIST;
       mutex_lock(&mylock);
-        if(cur < _MAZE_MAXUSER)
-          cur++;
-        else{
-          mutex_unlock(&mylock);
-          return -ENOMEM;
-        }
+      // now = search_user(users_head, current->pid);
+      if(cur < _MAZE_MAXUSER)
+        cur++;
+      else{
+        mutex_unlock(&mylock);
+        return -ENOMEM;
+      }
+      mutex_unlock(&mylock);
 
       now->maze = kzalloc(sizeof(maze_t), GFP_KERNEL);
       maze_init(now->maze, coord);
-      mutex_unlock(&mylock);
+
       now->pos.x = now->maze->sx;
       now->pos.y = now->maze->sy;
       break;
