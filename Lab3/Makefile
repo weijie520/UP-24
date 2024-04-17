@@ -1,5 +1,5 @@
 
-LDFLAGS = -lunwind -lunwind-$(shell uname -m)
+LDFLAGS = -ldl
 
 # SRC = $(wildcard *.c)
 # OBJ = $(SRC:.c=.o)
