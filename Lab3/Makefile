@@ -8,6 +8,9 @@ all:libmaze.so libsolver.so
 %.o: %.c
 	gcc -c -Wall -fPIC $< -o $@
 
+# maze: maze.o
+# 	gcc -Wall -o $@ $^ $(LDFLAGS)
+
 libmaze.so: libmaze_dummy.o
 	gcc -shared -Wall -o $@ $^ $(LDFLAGS)
 
