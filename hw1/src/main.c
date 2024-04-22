@@ -7,6 +7,7 @@
 int main(int argc, char *argv[]){
   char* sopath = "./logger.so";
   char* output_file = NULL;
+  char* config = argv[1];
   char **command;
   int opt;
   int fd = -1;
@@ -27,7 +28,6 @@ int main(int argc, char *argv[]){
         break;
     }
   }
-
   // for(int i = 0; i < argc; i++){
   //   printf("argv[%d]: %s\n", i, argv[i]);
   // }
@@ -36,6 +36,7 @@ int main(int argc, char *argv[]){
 
   // return 0;
   setenv("LD_PRELOAD", sopath, 1); // set LD_PRELOAD to the path of the shared object
+  setenv("CONFIG", config, 1);
 
   if(output_file != NULL){
     fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
