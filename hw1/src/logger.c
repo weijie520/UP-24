@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <libgen.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dlfcn.h>
@@ -67,7 +68,7 @@ blacknode *connect_blacklist = NULL;
 blacknode *getaddrinfo_blacklist = NULL;
 
 void blacklist_init(){
-  FILE *fp = o_fopen("./config.txt", "r");
+  FILE *fp = o_fopen(getenv("CONFIG"), "r");
   if(fp == NULL){
     perror("fopen");
     exit(EXIT_FAILURE);
@@ -84,10 +85,9 @@ void blacklist_init(){
         if(path[strlen(path)-2] == '*'){
           path[strlen(path)-2] = '\0';
         }
-        // path[strlen(path)-1] = '\0';
-        char p[256];
-        realpath(path, p); // used to resolve link
-        list_add(&open_blacklist, p);
+        else path[strlen(path)-1] = '\0';
+
+        list_add(&open_blacklist, path);
         free(path);
         getline(&line, &len, fp);
       }
@@ -114,10 +114,7 @@ void blacklist_init(){
           path[strlen(path)-2] = '\0';
         }
         else path[strlen(path)-1] = '\0';
-        char p[256];
-        realpath(path, p); // used to resolve link
-        // printf("%s\n", p);
-        list_add(&write_blacklist, p);
+        list_add(&write_blacklist, path);
         free(path);
         getline(&line, &len, fp);
       }
@@ -145,7 +142,7 @@ void blacklist_init(){
         getline(&line, &len, fp);
       }
     }
-    
+
   }
   free(line);
   fclose(fp);
@@ -199,7 +196,7 @@ void process_escape_string(char *str1, char *str2){
         *dst++ = '\\';
         *dst++ = 'a';
         break;
-      case '\b': 
+      case '\b':
         *dst++ = '\\';
         *dst++ = 'b';
         break;
@@ -210,6 +207,16 @@ void process_escape_string(char *str1, char *str2){
     src++;
   }
   *dst = '\0';
+}
+
+char* myrealpath(const char *path, char* resolved_path){
+  if(path[0] == '/'){
+    strcpy(resolved_path, path);
+    return resolved_path;
+  }
+  else{
+    return realpath(path,resolved_path);
+  }
 }
 
 char* getpath(FILE *stream){
@@ -230,10 +237,14 @@ char* getpath(FILE *stream){
 FILE* fopen(const char *path, const char *mode){
   FILE *fp = NULL;
   char p[256];
-  realpath(path, p); // used to resolve link
+  memset(p,0,256);
+  struct stat st;
+  int x;
+  x = lstat(path, &st);
+  if(S_ISLNK(st.st_mode)) readlink(path, p, 256);
+  else myrealpath(path,p);
   if(list_search(open_blacklist, p, 0) != NULL){
     errno = EACCES;
-    fp = NULL;
   }
   else fp = o_fopen(p, mode);
 
@@ -245,7 +256,7 @@ FILE* fopen(const char *path, const char *mode){
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream){
   char *path = getpath(stream);
   char *filename = strtok(basename(path), ".");
-
+  memset(ptr, 0, size*nmemb+1);
   char logfile[256];
   sprintf(logfile, "%d-%s-read.log", getpid(), filename);
   free(path);
@@ -253,21 +264,22 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream){
   size_t ret = o_fread(ptr, size, nmemb, stream);
   if(list_search(read_blacklist, (char*)ptr,1) != NULL){
     errno = EACCES;
+    fseek(stream, -(size * nmemb), SEEK_CUR);
     memset(ptr, 0, size * nmemb);
     ret = 0;
   }else{
     FILE *log_fp = o_fopen(logfile, "a+");
-    o_fwrite(ptr, 1, ret, log_fp);   
+    fprintf(log_fp, "%s\n", (char*)ptr);
     fclose(log_fp);
   }
-  
+
   fprintf(stderr, "[logger] fread(%p, %lu, %lu, %p) = %ld\n", ptr, size, nmemb, stream, ret);
   return ret;
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream){
   char *path = getpath(stream);
-  
+
   if(list_search(write_blacklist, path, 2) != NULL){
     errno = EACCES;
     free(path);
@@ -277,15 +289,15 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream){
   free(path);
   char logfile[256];
   sprintf(logfile, "%d-%s-write.log", getpid(), filename);
-
-  FILE *log_fp = o_fopen(logfile, "a+");
-  o_fwrite(ptr, size, nmemb, log_fp);
-  fclose(log_fp);
-
-  size_t ret = o_fwrite(ptr, size, nmemb, stream);
   char str[256];
   memset(str, 0, 256);
   process_escape_string((char*)ptr, str);
+  FILE *log_fp = o_fopen(logfile, "a+");
+  o_fwrite(str, size, strlen(str), log_fp);
+  fprintf(log_fp, "\n");
+  fclose(log_fp);
+  
+  size_t ret = o_fwrite(str, size, nmemb, stream);
   fprintf(stderr, "[logger] fwrite(\"%s\", %lu, %lu, %p) = %ld\n", str, size, nmemb, stream, ret);
   return ret;
 }
